@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>dc group archiver</title>
+    <div id="lightbox" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);justify-content:center;align-items:center;z-index:9999;">
+        <span id="lightbox-close" style="position:absolute;top:20px;right:30px;font-size:2em;color:white;cursor:pointer;">&times;</span>
+        <img id="lightbox-img" src="" style="max-width:90%;max-height:90%;object-fit:contain;">
+    </div>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #1a1a1e;
+            color: white;
+        }
+        #labels {
+            margin-top: 20px;
+        }
+        .label.me {
+            background: #1c2425;
+            border-left: 5px solid #2faee0;
+        }
+        .label.me:hover {
+            background: #171f20;
+        }
+        .label.everyone {
+            background: #25201c;
+            border-left: 5px solid #e07f2f;
+        }
+        .label.everyone:hover {
+            background: #201b17;
+        }
+        .label {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 5px 20px;
+            border-radius: 5px;
+            background: #1a1a1e;
+            transition: background 0.3s;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .respond {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0px;
+            padding: 5px 20px;
+            border-radius: 5px;
+            background: #1a1a1e;
+            transition: background 0.3s;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .label:hover {
+            background: #28242c;
+        }
+        .profile {
+            align-self: flex-start;
+            width: 2em;
+            height: 2em;
+            aspect-ratio: 1;
+            margin-right: 10px;
+            border-radius: 50%;
+            object-fit: cover;
+            flex-shrink: 0;
+        }
+        .label img:not(.profile) {
+            background-color: yellow; /* your other CSS */
+            height: 250px; /* Set the desired height */
+            width: auto;   /* Maintain the aspect ratio */
+        }
+        .bold {
+            font-weight: bold;
+        }
+        .italic {
+            font-style: italic;
+        }
+        .spoiler {
+            background-color: black;
+            color: black;
+            cursor: pointer;
+        }
+        .spoiler:hover {
+            color: white;
+        }
+        pre.code {
+            font-family: monospace;
+            background: #ddd;
+            padding: 5px 8px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .corner {
+            display: inline-block;         /* so it can sit inline with text */
+            width: 6px;
+            height: 6px;
+            border-top: 2px solid #474747;
+            border-right: 2px solid #474747;
+            border-top-right-radius: 6px;
+            transform: rotate(-90deg);
+            vertical-align: bottom;        /* adjust alignment with text */
+            margin-left: 10px;              /* optional spacing from text */
+        }
+        pre.lua { background: #f2f2d6; }
+        pre.js { background: #f0f0ff; }
+        pre.python { background: #f0fff0; }
+    </style>
+</head>
+<body>
+    <h2>Discord Group Archiver</h2>
+    <button id="loadall">LOAD ALL MESSAGES</button>
+    <button id="selectOptionBtn">Select Option</button>
+    <span id="currentOption" style="margin-left:10px; color:#aaa;">(none selected)</span>
+    <div id="labels"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <script>
+// SEARCH ENGINE------------------------------------------------------------------------------------------------
+let loadall = false;
+document.getElementById("loadall").addEventListener("click", function() { 
+    loadall = true;
+});
+
+
+
+
+
+
+
+
+
+
+
+
+// configs1
+        let db = null;
+        let currentOption = null;
+        let currentOption_t = null;
+        let allUsers = [];
+        let currentUserIndex = 0;
+        let batchSize = 40;
+        let TENOR_API_KEY = "AIzaSyBugdIoCHanM5H2vSMEtqg3GLKu_NNEBnc";
+        let emojitable = {};
+        let respondtable = {};
+        let attachmenttable = {};
+
+
+        document.getElementById("selectOptionBtn").addEventListener("click", () => {
+            if (!allUsers || allUsers.length === 0) return;
+
+            currentUserIndex = (currentUserIndex + 1) % allUsers.length;
+
+            const user = allUsers[currentUserIndex];
+            const counter = `${currentUserIndex+1}/${allUsers.length} | `
+
+            if (!user.display_name) {
+                // Count how many nulls appear **before this index**
+                let nullIndex = 0;
+                for (let i = 0; i <= currentUserIndex; i++) {
+                    if (!allUsers[i].display_name) nullIndex++;
+                }
+                currentOption = null;
+                currentOption_t = `${counter}Deleted User${nullIndex}`;
+            } else {
+                currentOption = user.display_name;
+                currentOption_t = `${counter}${user.display_name}`;
+            }
+
+            document.getElementById("currentOption").textContent = currentOption_t;
+        });
+
+        async function initDB() {
+// configs2
+            const dbInstance = await loadBase64DB(`https://raw.githubusercontent.com/Veko-Studio/goofy-group/refs/heads/main/${window.location.pathname.split("/").at(-2).split(".")[0]}.txt`);
+            db = dbInstance;
+
+            // ✅ Load users AFTER db is ready
+            allUsers = getTableJSON2('users') || [];
+            if (allUsers.length > 0) {
+                currentUserIndex = -1;
+            }
+            const tables = [
+            {
+                name: 'message_replied_to',
+                mapping: { replied_to_id: 'to' }
+            },
+            {
+                name: 'message_reactions',
+                mapping: { emoji_id: 'id', emoji_name: 'name', count: 'count' }
+            },
+            {
+                name: 'message_attachments',
+                mapping: { attachment_id: 'id' }
+            }
+        ];
+
+        // Function to process a table
+        function processTable(config) {
+            const raw = getTableJSON3(config.name);
+            const grouped = {};
+
+            raw.forEach(batch => {
+                const msgId = batch.message_id;
+                if (!grouped[msgId]) grouped[msgId] = [];
+
+                const entry = {};
+                for (const [original, stored] of Object.entries(config.mapping)) {
+                    entry[stored] = batch[original];
+                }
+                grouped[msgId].push(entry);
+            });
+
+            console.log(`[${config.name} raw]`, raw.length, raw);
+            console.log(`[${config.name}]`, Object.keys(grouped).length, grouped);
+
+            return grouped;
+        }
+
+        // Process all tables dynamically
+        respondtable = processTable(tables[0]);
+        emojitable = processTable(tables[1]);
+        attachmenttable = processTable(tables[2]);
+
+
+            const data = getTableJSON('messages');
+            if (data.length > 0) {
+                for (let i = 0; i < data.length; i += batchSize) {
+                    let batch = data.slice(i, i + batchSize);
+                    batch.forEach(message => {
+                        const userid = message.sender_id;
+                        const user = getuserdata(Number(userid));
+                        const date = timestampToDate(Number(message.timestamp));
+                        let imgUrl = `https://cdn.discordapp.com/avatars/${userid}/${user.avatar_url}.png`;
+                        if (!user.avatar_url) imgUrl = "https://cdn.discordapp.com/embed/avatars/0.png";
+
+                        createLabel(`${user.display_name || "Deleted User"} ??[#575656]!![0.7]${date}!!??\n${message.text}`, imgUrl,message.message_id);
+                    });
+                    await waitForScrollToBottom();
+                }
+            }
+        }
+
+        // Call it
+        initDB();
+
+        function waitForScrollToBottom() {
+            return new Promise(resolve => {
+                function checkScroll() {
+                    // If loadall is true, skip waiting
+                    if (loadall === true) {
+                        setTimeout(() => {
+                            resolve();
+                        }, 0);
+                        return;
+                    }
+
+                    const scrollPosition = window.innerHeight + window.scrollY;
+                    const threshold = document.body.offsetHeight - 50; // 50px from bottom
+
+                    if (scrollPosition >= threshold) {
+                        resolve();
+                        return;
+                    }
+
+                    // Keep checking on the next animation frame
+                    requestAnimationFrame(checkScroll);
+                }
+
+                checkScroll(); // Start the loop
+            });
+        }
+
+        async function loadBase64DB(url) {
+            try {
+                let base64Text = await fetch(url).then(r => r.text());
+                if (base64Text.charCodeAt(0) === 0xFEFF) base64Text = base64Text.slice(1);
+                base64Text = base64Text.replace(/[\s\r\n]+/g, '');
+                base64Text = base64Text.replace(/[^A-Za-z0-9+/=]/g, '');
+                base64Text = base64Text.replace(/=+$/, '');
+                while (base64Text.length % 4 !== 0) base64Text += '=';
+
+                const chunkSize = 8192;
+                let binary = '';
+                for (let i = 0; i < base64Text.length; i += chunkSize) {
+                    binary += atob(base64Text.substring(i, i + chunkSize));
+                }
+
+                const len = binary.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+
+                const SQL = await initSqlJs({ locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}` });
+                const db = new SQL.Database(bytes);
+
+                console.log("Database loaded successfully!");
+                return db;
+            } catch (err) {
+                console.error("Failed to load Base64 DB:", err);
+            }
+        }
+
+        function getTableJSON(tableName) {
+            if (!db) return null;
+            try {
+                const stmt = db.prepare(`
+                    SELECT 
+                        CAST(sender_id AS TEXT) AS sender_id,
+                        text,
+                        timestamp,
+                        message_id
+                    FROM ${tableName}
+                `);
+                const result = [];
+                while (stmt.step()) {
+                    const row = stmt.getAsObject();
+                    for (let key in row) {
+                        if (typeof row[key] === "number") row[key] = row[key].toString();
+                    }
+                    result.push(row);
+                }
+                stmt.free();
+                return result;
+            } catch (e) {
+                console.error(e);
+                return [];
+            }
+        }
+
+        function getTableJSON2(tableName) {
+            if (!db) return null;
+            try {
+                const res = db.exec(`SELECT * FROM ${tableName}`);
+                if (res.length === 0) return [];
+                const columns = res[0].columns;
+                const values = res[0].values;
+                return values.map(row => {
+                    let obj = {};
+                    row.forEach((val, i) => { obj[columns[i]] = val; });
+                    return obj;
+                });
+            } catch (e) {
+                console.error(e);
+                return [];
+            }
+        }
+
+        function getTableJSON3(tableName) {
+            if (!db) return null;
+            try {
+                const stmt = db.prepare(`SELECT * FROM ${tableName}`);
+                const result = [];
+                while (stmt.step()) {
+                    const row = stmt.getAsObject();
+                    for (let key in row) {
+                        if (typeof row[key] === "number") row[key] = row[key].toString();
+                    }
+                    result.push(row);
+                }
+                stmt.free();
+                return result;
+            } catch (e) {
+                console.error(e);
+                return [];
+            }
+        }
+
+        function getRowAsJSONById(table, id) {
+            const rows = getTableJSON2(table);
+            if (!rows) return null;
+            const roundedId = Math.round(Number(id) / 100) * 100;
+            const row = rows.find(r => Math.round(Number(r.id) / 100) * 100 === roundedId);
+            return row ? { ...row } : null;
+        }
+
+        function getRowAsJSONBymsId(table, id) {
+            const rows = getTableJSON2(table);
+            if (!rows) return null;
+            const roundedId = Math.round(Number(id) / 100) * 100;
+            const row = rows.find(r => Math.round(Number(r.message_id) / 100) * 100 === roundedId);
+            return row ? { ...row } : null;
+        }
+
+        function getuserdata(userID) {
+            return getRowAsJSONById("users", userID) || {};
+        }
+
+        function timestampToDate(ms) {
+            if (!ms) return null;
+            const date = new Date(ms);
+            const options = {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            };
+            return date.toLocaleString('default', options).replace(',', '');
+        }
+
+        function roundBigInt(value, step) {
+            step = BigInt(step);
+            let remainder = value % step;
+            let halfStep = step / 2n;
+            let base = value - remainder;
+
+            if (remainder > halfStep) {
+                return base + step;           // round up
+            } else if (remainder < halfStep) {
+                return base;                  // round down
+            } else {
+                // tie: round to nearest even multiple
+                return (base / step) % 2n === 0n ? base : base + step;
+            }
+        }
+
+        function shortenString(str) {
+            if (str.length <= 15) {
+                return str;
+            } else {
+                return str.slice(0, 12) + "...";
+            }
+        }
+
+
+        async function createLabel(text, imgUrl, messageid) {
+            // --- Detect Discord attachment links in message text ---
+            const discordAttachmentRegex = /https:\/\/cdn\.discordapp\.com\/attachments\/\d+\/(\d+)/g;
+            let match;
+            let attachmentIdsFromText = [];
+            while ((match = discordAttachmentRegex.exec(text)) !== null) {
+                let id = BigInt(match[1]);
+                // Round to nearest 100
+                let roundedId = ((id + 50n) / 100n) * 100n;
+                attachmentIdsFromText.push(roundedId.toString());
+            }
+
+            const container = document.getElementById('labels');
+            const div = document.createElement('div');
+            div.className = 'label';
+            div.dataset.messageId = String(messageid);
+
+            let html = text;
+
+            // DC ping highlighting
+            html = html.replace(/<@!?(\d+)>/g, (match, p1) => {
+                const user = getuserdata(Number(p1));
+                return `§§[#1c478c]@${user.display_name || p1}§§`;
+            });
+            html = html.replace(/@everyone/g, `§§[#1c478c]@everyone§§`);
+
+            // PS Color
+            html = html.replace(/\?\?\[(#?\w+)\](.+?)\?\?/g, (match, color, txt) => {
+                return `<code><span style="color:${color}">${txt}</span></code>`;
+            });
+            html = html.replace(/§§\[(#?\w+)\](.+?)§§/g, (match, color, txt) => {
+                return `<code><span style="background:${color}">${txt}</span></code>`;
+            });
+
+            // PS Size
+            html = html.replace(/!!\[(\d+(\.\d+)?)\](.+?)!!/g, (match, size, _, txt) => {
+                return `<code><span style="font-size:${parseFloat(size) * 16}px">${txt}</span></code>`;
+            });
+
+            // DC Spoilers
+            html = html.replace(/\|\|(.+?)\|\|/g, '<span class="spoiler">$1</span>');
+
+            // DC Inline code (backticks)
+            html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+            // DC Bold + italic
+            html = html.replace(/\*\*(.+?)\*\*/g, '<span class="bold">$1</span>');
+            html = html.replace(/\*(.+?)\*/g, '<span class="italic">$1</span>');
+
+            // PS Newlines
+            html = html.replace(/\n/g, '<br>');
+
+            // DC big text #
+            html = html.replace(/# (.*?)(?=<br>|$)/g, (match, txt) => {
+                return `<span style="font-size:${16+16}px;font-weight: bold">${txt}</span>`;
+            });
+            // DC big text ##
+            html = html.replace(/# (.*?)(?=<br>|$)/g, (match, txt) => {
+                return `<span style="font-size:${16+(16/2)}px;font-weight: bold">${txt}</span>`;
+            });
+            // DC big text ###
+            html = html.replace(/# (.*?)(?=<br>|$)/g, (match, txt) => {
+                return `<span style="font-size:${16}px;font-weight: bold">${txt}</span>`;
+            });
+
+            let messageidBig = BigInt(messageid); // convert to BigInt
+            let msid = roundBigInt(messageidBig, 100);
+            // emoji handling
+            let messageemojis = emojitable[msid];
+            if (messageemojis && messageemojis.length > 0) {
+                html += "<br>"
+                console.log("got a message with reactions here")
+                messageemojis.forEach(emoji => {
+                    html += `${emoji.name} ${emoji.count} `;
+                });
+            }
+            // respond handling
+            messageemojis = respondtable[msid];
+            if (messageemojis && messageemojis.length > 0) {
+                messageemojis = messageemojis[0]
+                console.log("got a message with respond here")
+                    console.log(messageemojis,"<br>",messageemojis.to,"<br>",String(messageemojis.to),"<br>",html)
+                    let diva = document.querySelector(`[data-message-id="${messageemojis.to}"]`);
+                    const profileSrc = diva.querySelector('img.profile')?.src || 'ERROR_RESPOND_PROFILESRC';
+                    const username = diva.querySelector('div')?.childNodes[0]?.textContent.trim() || 'ERROR_RESPOND_USERNAME';
+                    const messageText = shortenString(diva.querySelector('div')?.querySelector('br')?.nextSibling?.textContent.trim()) || (diva.querySelector('div').querySelector('img') && "image") || 'ERROR_RESPOND_MESSAGE';
+                    const div2 = document.createElement('div');
+                    div2.innerHTML = `<span class="corner"></span>${username} | ${messageText}`;
+                    div2.classList.add('respond');
+                    container.appendChild(div2);
+            }
+            // attachment handling
+            let attachments = attachmenttable[msid];
+
+            // Also include IDs extracted from message text
+            attachmentIdsFromText.forEach(id => {
+                attachments.push({ id });
+            });
+
+            if (attachments && attachments.length > 0) {
+                html += "<br>";
+                console.log("got a message with attachment here");
+
+                const tryExtensions = ["png", "jpg", "jpeg", "gif", "webp", "txt", "log", "md", "csv"];
+
+                attachments.forEach(att => {
+                    let basePath = `export/attachments_${att.id}`;
+
+                    // try images first
+                    let tried = false;
+                    for (let ext of tryExtensions) {
+                        let filePath = `${basePath}.${ext}`;
+
+                        if (["gif","png", "jpg", "jpeg", "webp"].includes(ext)) {
+                            // use <img>, if it fails the browser won’t show it
+                            html += `<img src="${filePath}" onerror="this.remove()" style="max-height:300px; display:block; margin-bottom:10px; border-radius: 10px;">`;
+                            tried = true;
+                            //break; // stop after first match attempt
+                        } else if (["txt", "log", "md", "csv"].includes(ext)) {
+                            html += `<iframe src="${filePath}" onload="if (!this.contentDocument || this.contentDocument.body.innerHTML.trim() === '') this.remove();" style="width:400px; height:200px; border:1px solid #ccc; margin-bottom:10px; border-radius: 10px;"></iframe>`;
+                            tried = true;
+                            //break;
+                        }
+                    }
+                });
+            }
+
+
+
+            // completion
+            const img = document.createElement('img');
+            img.src = imgUrl;
+            img.classList.add('profile')
+            div.appendChild(img);
+
+            const textDiv = document.createElement('div');
+            textDiv.innerHTML = html;
+            div.appendChild(textDiv);
+
+            let i = 0;
+div.dataset.originalTxt = text;
+setInterval(() => {
+    // Special handling for yourself
+    if (html.includes(`${currentOption}`)) {
+        div.classList.add('me');
+    } else {
+        div.classList.remove('me');
+    }
+    // Highlight messages that mention @everyone or the current user
+    if (html.includes('@everyone') || html.includes(`@${currentOption}`)) {
+        div.classList.add('everyone');
+    } else {
+        div.classList.remove('everyone');
+    }
+
+    i++;
+}, 1000);
+            let ticking = false;
+
+            window.addEventListener("scroll", () => {
+                if (!ticking) {
+                    window.requestAnimationFrame(() => {
+                        const rect = div.getBoundingClientRect();
+                        const isInView = rect.top < window.innerHeight && rect.bottom > 0;
+                        div.style.visibility = isInView ? "visible" : "hidden";
+                        ticking = false;
+                    });
+                    ticking = true;
+                }
+            });
+            container.appendChild(div);
+        }
+    </script>
+<script>
+// image full size viewer ------------------------------------------------
+document.addEventListener('DOMContentLoaded', () => {
+    const lightbox = document.getElementById('lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
+    const closeBtn = document.getElementById('lightbox-close');
+
+    // Event delegation: listen for clicks on images inside #labels
+    document.getElementById('labels').addEventListener('click', (e) => {
+        if (e.target.tagName.toLowerCase() === 'img') {
+            lightboxImg.src = e.target.src;
+            lightbox.style.display = 'flex';
+        }
+    });
+
+    closeBtn.addEventListener('click', () => {
+        lightbox.style.display = 'none';
+        lightboxImg.src = '';
+    });
+
+    // Close if clicking outside the image
+    lightbox.addEventListener('click', (e) => {
+        if (e.target === lightbox) {
+            lightbox.style.display = 'none';
+            lightboxImg.src = '';
+        }
+    });
+});
+</script>
+</body>
+</html>
